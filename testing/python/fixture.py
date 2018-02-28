@@ -519,6 +519,41 @@ class TestRequestBasic(object):
         assert len(arg2fixturedefs) == 1
         assert arg2fixturedefs['something'][0].argname == "something"
 
+    def test_request_garbage(self, testdir):
+        testdir.makepyfile("""
+            import sys
+            import pytest
+            import gc
+
+            @pytest.fixture(autouse=True)
+            def something(request):
+                # this method of test doesn't work on pypy
+                if hasattr(sys, "pypy_version_info"):
+                    yield
+                else:
+                    original = gc.get_debug()
+                    gc.set_debug(gc.DEBUG_SAVEALL)
+                    gc.collect()
+
+                    yield
+
+                    gc.collect()
+                    leaked_types = sum(1 for _ in gc.garbage
+                                    if 'PseudoFixtureDef' in str(_))
+
+                    gc.garbage[:] = []
+
+                    try:
+                        assert leaked_types == 0
+                    finally:
+                        gc.set_debug(original)
+
+            def test_func():
+                pass
+        """)
+        reprec = testdir.inline_run()
+        reprec.assertoutcome(passed=1)
+
     def test_getfixturevalue_recursive(self, testdir):
         testdir.makeconftest("""
             import pytest
@@ -2168,6 +2203,47 @@ class TestFixtureMarker(object):
             test_mod1.py::test_func1[m2] PASSED
         """)
 
+    def test_dynamic_parametrized_ordering(self, testdir):
+        testdir.makeini("""
+            [pytest]
+            console_output_style=classic
+        """)
+        testdir.makeconftest("""
+            import pytest
+
+            def pytest_configure(config):
+                class DynamicFixturePlugin(object):
+                    @pytest.fixture(scope='session', params=['flavor1', 'flavor2'])
+                    def flavor(self, request):
+                        return request.param
+                config.pluginmanager.register(DynamicFixturePlugin(), 'flavor-fixture')
+
+            @pytest.fixture(scope='session', params=['vxlan', 'vlan'])
+            def encap(request):
+                return request.param
+
+            @pytest.fixture(scope='session', autouse='True')
+            def reprovision(request, flavor, encap):
+                pass
+        """)
+        testdir.makepyfile("""
+            def test(reprovision):
+                pass
+            def test2(reprovision):
+                pass
+        """)
+        result = testdir.runpytest("-v")
+        result.stdout.fnmatch_lines("""
+            test_dynamic_parametrized_ordering.py::test[flavor1-vxlan] PASSED
+            test_dynamic_parametrized_ordering.py::test2[flavor1-vxlan] PASSED
+            test_dynamic_parametrized_ordering.py::test[flavor2-vxlan] PASSED
+            test_dynamic_parametrized_ordering.py::test2[flavor2-vxlan] PASSED
+            test_dynamic_parametrized_ordering.py::test[flavor2-vlan] PASSED
+            test_dynamic_parametrized_ordering.py::test2[flavor2-vlan] PASSED
+            test_dynamic_parametrized_ordering.py::test[flavor1-vlan] PASSED
+            test_dynamic_parametrized_ordering.py::test2[flavor1-vlan] PASSED
+        """)
+
     def test_class_ordering(self, testdir):
         testdir.makeini("""
             [pytest]
@@ -2828,7 +2904,7 @@ class TestShowFixtures(object):
     def test_show_fixtures_indented_in_class(self, testdir):
         p = testdir.makepyfile(dedent('''
             import pytest
-            class TestClass:
+            class TestClass(object):
                 @pytest.fixture
                 def fixture1(self):
                     """line1

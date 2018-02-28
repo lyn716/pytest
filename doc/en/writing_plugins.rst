@@ -278,7 +278,7 @@ the plugin manager like this:
 
 .. sourcecode:: python
 
-    plugin = config.pluginmanager.getplugin("name_of_plugin")
+    plugin = config.pluginmanager.get_plugin("name_of_plugin")
 
 If you want to look at the names of existing plugins, use
 the ``--trace-config`` option.
@@ -462,18 +462,23 @@ Here is an example definition of a hook wrapper::
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_pyfunc_call(pyfuncitem):
-        # do whatever you want before the next hook executes
+        do_something_before_next_hook_executes()
 
         outcome = yield
         # outcome.excinfo may be None or a (cls, val, tb) tuple
 
         res = outcome.get_result()  # will raise if outcome was exception
-        # postprocess result
+
+        post_process_result(res)
+
+        outcome.force_result(new_res)  # to override the return value to the plugin system
 
 Note that hook wrappers don't return results themselves, they merely
 perform tracing or other side effects around the actual hook implementations.
 If the result of the underlying hook is a mutable object, they may modify
 that result but it's probably better to avoid it.
+
+For more information, consult the `pluggy documentation <http://pluggy.readthedocs.io/en/latest/#wrappers>`_.
 
 
 Hook function ordering / call example
@@ -583,11 +588,22 @@ pytest hook reference
 Initialization, command line and configuration hooks
 ----------------------------------------------------
 
+Bootstrapping hooks
+~~~~~~~~~~~~~~~~~~~
+
+Bootstrapping hooks called for plugins registered early enough (internal and setuptools plugins).
+
 .. autofunction:: pytest_load_initial_conftests
 .. autofunction:: pytest_cmdline_preparse
 .. autofunction:: pytest_cmdline_parse
-.. autofunction:: pytest_addoption
 .. autofunction:: pytest_cmdline_main
+
+Initialization hooks
+~~~~~~~~~~~~~~~~~~~~
+
+Initialization hooks called for plugins and ``conftest.py`` files.
+
+.. autofunction:: pytest_addoption
 .. autofunction:: pytest_configure
 .. autofunction:: pytest_unconfigure
 
@@ -598,6 +614,8 @@ All runtest related hooks receive a :py:class:`pytest.Item <_pytest.main.Item>` 
 
 .. autofunction:: pytest_runtestloop
 .. autofunction:: pytest_runtest_protocol
+.. autofunction:: pytest_runtest_logstart
+.. autofunction:: pytest_runtest_logfinish
 .. autofunction:: pytest_runtest_setup
 .. autofunction:: pytest_runtest_call
 .. autofunction:: pytest_runtest_teardown
@@ -682,14 +700,14 @@ Reference of objects involved in hooks
 .. autoclass:: _pytest.config.Parser()
     :members:
 
-.. autoclass:: _pytest.main.Node()
+.. autoclass:: _pytest.nodes.Node()
     :members:
 
-.. autoclass:: _pytest.main.Collector()
+.. autoclass:: _pytest.nodes.Collector()
     :members:
     :show-inheritance:
 
-.. autoclass:: _pytest.main.FSCollector()
+.. autoclass:: _pytest.nodes.FSCollector()
     :members:
     :show-inheritance:
 
@@ -697,7 +715,7 @@ Reference of objects involved in hooks
     :members:
     :show-inheritance:
 
-.. autoclass:: _pytest.main.Item()
+.. autoclass:: _pytest.nodes.Item()
     :members:
     :show-inheritance:
 
